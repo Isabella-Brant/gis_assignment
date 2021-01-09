@@ -1,0 +1,681 @@
+---
+title: "data_cleaning"
+author: "Isabella Brant"
+date: "09/01/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 01 Data Cleaning and Processing
+
+This is part 1 of the methodology. This section will provide a walk through of the data cleaning and processing that was required for the analysis.
+
+Load the libraries:
+
+```{r library}
+library(dplyr)
+library(tidyverse)
+library(janitor)
+library(sf)
+library(tmap)
+library(tmaptools)
+```
+
+### COVID-19 case data for London MSOAs
+
+```{r covid read, echo=FALSE}
+covid_msoa <- read_csv("data/raw/msoa_E12000007_2020-12-13.csv")
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+Now filter the data to make sure all area codes are E02:
+
+```{r covid filter}
+covid_msoa <- covid_msoa %>%
+  filter(str_detect(`areaCode`, "E02"))%>%
+  dplyr::select(c(areaCode, areaName, date, newCasesBySpecimenDateRollingSum)) #Fields we want\
+```
+
+Now convert the date field to data specification:
+
+```{r convert to date}
+covid_msoa$date <- as.Date(covid_msoa$date,"%d/%m/%y")
+```
+
+Now we need to remove the data from the weeks in the first wave. This dataset begins in March 2020 when testing first began in the UK however mass testing for the general public was only made available from May. It was decided for this study to only use case data from the call of the 'second wave' in the UK since the case data is a more accurate representation of COVID-19 prevalence in London. The beginning of the second wave of COVID-19 in the UK is defined from the week commencing 22 September 2020 where new restrictions were put in place and following Johnson's announcement of a seconf wave on 18 September 2020.
+
+```{r covid further clean}
+covid_msoa <- covid_msoa%>%
+  subset(., date >= "2020-09-22")
+
+#Making na values 0 so sum function works
+covid_msoa <- covid_msoa %>%
+  mutate(newCasesBySpecimenDateRollingSum = if_else(is.na(newCasesBySpecimenDateRollingSum), 0, newCasesBySpecimenDateRollingSum))
+
+#Creating new df with aggregated total of covid-19 cases in the second wave
+covid_msoa_totals <- covid_msoa%>% 
+  dplyr::group_by(areaCode) %>% 
+  dplyr::summarise(newCasesBySpecimenDateRollingSum = sum(newCasesBySpecimenDateRollingSum))%>%
+  rename(total_cases = newCasesBySpecimenDateRollingSum,
+         area_code = areaCode)
+```
+
+Lets have a look at the distribution of COVID-19 case totals in each MSOA:
+
+```{r}
+#Distribution plot of covid cases for each msoa
+covid_msoa_totals%>%
+  ggplot(aes(x=total_cases)) +
+  geom_histogram(position="identity", 
+                 alpha=0.5, 
+                 bins=15, 
+                 fill="lightblue2", col="lightblue3")+
+  geom_vline(aes(xintercept=mean(total_cases)),
+             color="blue",
+             linetype="dashed")+
+  labs(title="Total COVID-19 cases for each MSOA from 22/09/2020 - 08/12/2020",
+       x="Total Cases",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Additional MSOA data
+
+Now we will load in additional MSOA level data that we will use as confounding variables in later analysis. The majority of this data derives from the 2011 census and provides information on various area-specific characteristics such as age structure, house size, average household income etc.
+
+```{r additional data}
+additional <- read_csv("data/raw/msoa-data.csv")
+```
+
+This dataset has 984 objects when there are 983 MSOAs in London. This following line of code removes the row:
+
+```{r filter}
+additional <- additional%>%
+  filter(str_detect(`Middle Super Output Area`, "E02"))
+```
+
+Now we will clean the field names using janitor:
+
+```{r name clean}
+#Clean field names using janitor
+additional <- clean_names(additional)
+```
+
+Next we will filter the dataset and select our fields of interest. These fields include Ethnic group, household composition %, age structure, tenure, dwelling type, land area, med house price, qualification, economic activity, household income, income deprivation, health, obesity %, life expectancy We will do this by specifying the index number of the columns:
+```{r}
+
+additional <- additional%>%
+  dplyr::select(c(1:9, 43, 49:53, 60:65, 96:99, 106:111, 112, 120, 132:139, 143:145, 148:151, 159:161, 167:171, 176, 182:183))
+```
+
+Next we will convert the age structure and level 4 or above qualifications field values into ratios. This data type is more comparable and insightful for analysis than raw numbers:
+
+```{r}
+#Converting age structure into ratios
+additional <- replace(additional, 4, additional$age_structure_2011_census_0_15 / additional$age_structure_2011_census_all_ages * 100)
+additional <- replace(additional, 5, additional$age_structure_2011_census_16_29 / additional$age_structure_2011_census_all_ages * 100)
+additional <- replace(additional, 6, additional$age_structure_2011_census_30_44 / additional$age_structure_2011_census_all_ages * 100)
+additional <- replace(additional, 7, additional$age_structure_2011_census_45_64 / additional$age_structure_2011_census_all_ages * 100)
+additional <- replace(additional, 8, additional$age_structure_2011_census_65 / additional$age_structure_2011_census_all_ages * 100)
+
+##Converting level 4 or above qualification field to ratio of total pop
+additional <- replace(additional, 39, additional$qualifications_2011_census_highest_level_of_qualification_level_4_qualifications_and_above / additional$age_structure_2011_census_all_ages * 100)
+```
+
+Here we will filter out several more fields in the dataset:
+
+```{r}
+additional <- additional%>%
+  dplyr::select(-c(9, 12, 15, 23, 25, 26, 27, 33, 34:38, 40:41, 43, 46:48))
+```
+
+Since we will be joining this data to a shapefile later we will need to shorten the field names to fit the shape file requirements. 
+
+*These are the less intuitive field name conversions:*
+- pct_hh_wc = percentge of couple households with dependent child
+- pct_lp_hh = percentage of lone parent household
+- pct_1p_hold = percentage of 1 person household
+- pct_mm = percentaged of mixed multiple ethnic groups
+- pct_ownout = percentage of owned outright tenure
+- pct_srent = percentage of social rented tenure
+- pct_ql4_ab = percentage of level 4 qualifications and above
+- pct_eco_a = percentage of economically active
+- pct_eco_ia =percentage of economically inactive
+- mn_ahh_in = mean annual household income (£)
+- pct_limlot = percentage of day to day activities limited a lot
+- pct_limltt = percentage of day to day activities limited a little
+- pct_limnot = percentage of day to day activities not limited
+- pct_16p_ob = percentage of 16 plus population obese (determined by bmi above 30)
+
+```{r}
+additional <- additional%>%
+  rename(pop = age_structure_2011_census_all_ages,
+         pct_0_15 = age_structure_2011_census_0_15,
+         pct_16_29 = age_structure_2011_census_16_29,
+         pct_30_44 = age_structure_2011_census_30_44,
+         pct_45_64 = age_structure_2011_census_45_64,
+         pct_65 = age_structure_2011_census_65,
+         hholds_tot = households_2011_all_households,
+         pct_hh_wdc = household_composition_2011_percentages_couple_household_with_dependent_children,
+         pct_lp_hh = household_composition_2011_percentages_lone_parent_household,
+         pct_1p_hh = household_composition_2011_percentages_one_person_household,
+         pct_white = ethnic_group_2011_census_white_percent,
+         pct_mm = ethnic_group_2011_census_mixed_multiple_ethnic_groups_percent,
+         pct_asian = ethnic_group_2011_census_asian_asian_british_percent,
+         pct_black = ethnic_group_2011_census_black_african_caribbean_black_british_percent,
+         pct_other = ethnic_group_2011_census_other_ethnic_group_percent,
+         pct_bame = ethnic_group_2011_census_bame_percent,
+         pct_ownout = tenure_2011_owned_owned_outright_percent,
+         pct_srent = tenure_2011_social_rented_percent,
+         pct_dtchd = dwelling_type_2011_whole_house_or_bungalow_detached_percent,
+         pct_semi = dwelling_type_2011_whole_house_or_bungalow_semi_detached_percent,
+         pct_trrced = dwelling_type_2011_whole_house_or_bungalow_terraced_including_end_terrace_percent,
+         pct_flat = dwelling_type_2011_flat_maisonette_or_apartment_percent,
+         land_ha = land_area_hectares,
+         pct_ql4_ab = qualifications_2011_census_highest_level_of_qualification_level_4_qualifications_and_above,
+         pct_eco_a = economic_activity_2011_census_economically_active_percent,
+         pct_eco_ia = economic_activity_2011_census_economically_inactive_percent,
+         mn_ahh_in = household_income_estimates_2011_12_total_mean_annual_household_income,
+         pct_limlot = health_2011_census_day_to_day_activities_limited_a_lot_percent,
+         pct_limltt = health_2011_census_day_to_day_activities_limited_a_little_percent,
+         pct_notlim = health_2011_census_day_to_day_activities_not_limited_percent,
+         pct_h_vg = health_2011_census_very_good_health_percent,
+         pct_h_g = health_2011_census_good_health_percent,
+         pct_h_f = health_2011_census_fair_health_percent,
+         pct_h_b = health_2011_census_bad_health_percent,
+         pct_h_vb = health_2011_census_very_bad_health_percent,
+         pct_16p_ob = obesity_percentage_of_the_population_aged_16_with_a_bmi_of_30_modelled_estimate_2006_2008,
+         le_male = life_expectancy_males,
+         le_female = life_expectancy_females)
+```
+
+### London MSOA boundary shapefiles 
+
+Now we will read in the London MSOA boundary shapefiles. Here we will select a couple of fields of interest and then join the COVID-19 data and additional data to it. 
+
+```{r}
+#Read in MSOA boundaries
+msoa_boundaries <- st_read("data/raw/statistical-gis-boundaries-london/ESRI/MSOA_2011_London_gen_MHW.shp")%>%
+  st_transform(., 27700)
+
+#Selecting fields 
+#Keeping pop density and avg hhold size
+msoa_boundaries <- msoa_boundaries%>%
+  dplyr::select(c(1, 2, 10, 12, 13))
+```
+
+Now it is ready for us to join the COVID-19 and additional data to it:
+
+```{r}
+#Join COVID cases to msoa_boundaries
+msoa_boundaries <- merge(msoa_boundaries, covid_msoa_totals, 
+                         by.x=1,
+                         by.y=1)
+
+#Join additional msoa data to msoa boundaries
+#Some cleaning
+msoas <- merge(msoa_boundaries, additional,
+               by.x=1,
+               by.y=1)%>%
+  mutate(area_m2 = st_area(.,),
+         area_ha = area_m2 / 10000)%>% #Creates msoa land areas
+  dplyr::select(-c("msoa_name"))%>% #drops the duplicate msoa name field
+  rename(name = MSOA11NM,
+         pop_den = POPDEN,
+         av_hhsz = AVHHOLDSZ)
+```
+
+### OS Green spaces and Access Points data
+
+This next section will be dedicated to cleaning and processing the green space and access point data. The data processing objective for the green space and and access point data is to create a proportion of proximate green space variable for each MSOA that we can include in later analysis. 
+
+*These are the following steps for the workflow:*
+-	Clip green spaces and access points to London boundary
+-	Sub-set the green space and access points into different simple feature objects using The London Plan’s defined public green space sizes (see literature review for green space size and proximity breakdown)
+-	Use the Mapbox Isochrone API to create 5 minute walk isochrone polygons for all access points that are referenced to green spaces of at least 2 hectares or more
+-	Dissolve the isochrones to create one sf object
+-	Intersect the dissolved isochrone sf object with the greenspaces to ensure all green spaces are included in the proximity object
+-	Intersect the final sf object to the London MSOA boundaries
+-	Calculate the area (in m2 and hectares) of proximate green space that intersects with each MSOA
+-	Calculate the percentage of each MSOA’s total land area that is covered by proximate green space
+-	Proportion of proximate green space variable has been created
+
+
+Lets read in the green space polygons and access points:
+
+```{r}
+green_spaces <- st_read("data/raw/OS Open Greenspace (ESRI Shape File) TQ/data/TQ_GreenspaceSite.shp")%>%
+  st_transform(., 27700)
+
+access_points <- st_read("data/raw/OS Open Greenspace (ESRI Shape File) TQ/data/TQ_AccessPoint.shp")%>%
+  st_transform(., 27700)
+```
+
+We need to clip the green space and access points to the London MSOA boundaries since this dataset includes green space and access points for London and South East England.
+
+```{r}
+green_spaces <- green_spaces[msoa_boundaries,]
+access_points <- access_points[msoa_boundaries,]
+```
+
+We can plot the green space and access points to see how we are getting on.
+
+Plot of green spaces:
+
+```{r}
+#Plot of greenspaces on MSOA layer
+tmap_mode("view")
+
+tm_shape(msoa_boundaries) +
+  tm_polygons(col = NA, alpha = 0.5) +
+  tm_shape(green_spaces)+
+  tm_polygons(col= "green", alpha=0.7)
+```
+
+Plot of access points:
+
+```{r}
+#Quick plot of access points on msoa boundaries
+tmap_mode("view")
+
+tm_shape(msoa_boundaries) +
+  tm_polygons(col = NA, alpha = 0.5) +
+  tm_shape(access_points)+
+  tm_dots(col= "green", size=0.02, alpha=0.5)
+```
+
+Now we can do some data cleaning that includes removing several unhelpful fields and tidying up the field names:
+
+```{r}
+#Removing several fields from green_spaces
+#Then cleaning field names
+green_spaces <- green_spaces%>%
+  dplyr::select(-c(4:6))%>%
+  rename(function_class = function.) #janitor will rename to 'function' which will cause problems
+
+green_spaces <-clean_names(green_spaces)
+```
+
+Now that we have cleaned the data we can begin exploring the green space and access points. First we should create new fields that contain the area of each greenspace in m2 and hectares. This will allow us to subset them by The London Plan's green space size and proximity recommendations [found here](https://www.london.gov.uk/sites/default/files/the_london_plan_2016_jan_2017_fix.pdf). 
+
+```{r}
+#creating new fields for area of green spaces in m2 and ha
+green_spaces <- green_spaces%>%
+  mutate(area_m2 = st_area(.),
+         area_ha = area_m2/10000)
+```
+
+Now we can have a quick look at the distribution of green space sizes in London. We can see that there is a large variance on green space sizes. 
+
+```{r}
+#Looking at the distribution of green space sizes in ha
+summary(green_spaces$area_ha)
+```
+
+The London Plan recommend the following proximity to green spaces from a citizen's home:
+sizes of green spaces (in ha) and proximity:
+
+- Linear Open Spaces - (variable) - wherever feasible
+- Pocket Parks - (under 0.4) - < 00m
+- Small Open Spaces - (under 2) - <400m
+- Local Parks and Open Spaces - (2) - 400m
+- District Parks - (20) - 1200m
+- Metropolitan Parks - (60) - 3200m
+- Regional Parks - (400) - 3200-8000m
+
+
+For this analysis we are going to explore green spaces of 2 hectares or more in size. First we need to convert the area columns from 'units' to numeric. This will allow us to subset the green spaces by area size:
+
+```{r}
+green_spaces$area_m2 <- as.numeric(green_spaces$area_m2)
+green_spaces$area_ha <- as.numeric(green_spaces$area_ha)
+```
+
+Here we can sub-set the green spaces by their area size defined by The London Plan:
+
+```{r}
+#less 0.4ha
+gs_less_0.4 <- green_spaces%>% #has 400m proximity policy
+  filter(area_ha<=0.4)
+
+#less than or equal to 2ha & more than 0.4
+gs_less_2 <- green_spaces%>% #has 400m proximity policy
+  filter(area_ha<=2.0 & area_ha>0.4)
+
+#less 20ha & more than 2
+gs_less_20 <- green_spaces%>% #min 400m proximity up to 1200m
+  filter(area_ha<=20 & area_ha>2.0)
+
+#less 60ha & more than 20
+gs_less_60 <- green_spaces%>% #min 1200m proximity up to 3200m
+  filter(area_ha<=60 & area_ha>20)
+
+#Less 400ha & more than 60 
+gs_less_400 <- green_spaces%>% #min 3200m proximity up to 8000m
+  filter(area_ha<=400 & area_ha>60)
+
+#More than 400ha
+gs_more_400 <- green_spaces%>% #3200m+ proximity policy
+  filter(area_ha>400)
+
+#Also going to make a subset for all greenspaces >2ha
+gs_more_2 <- green_spaces%>% #min 400m proximity policy
+  filter(area_ha>2)
+```
+
+Now we can see how the subset looks by plotting all green spaces of 2 hectares or more:
+
+```{r}
+tm_shape(msoa_boundaries) +
+  tm_polygons(col = "white", alpha = 0.2) +
+  tm_shape(gs_more_2)+
+  tm_polygons(col= "green")
+```
+
+Now that we have sub-set the green spaces we need to subset the access points to match the greenspace area subsets. We can do this by finding the green space ID and then matching it to the GSiteRef field in the access points. 
+
+The reason we are doing this is because we will be using the access points to create the proximity isochrones. We will only be focusing on green spaces of 2 hectares or more so need their respective access points:
+
+```{r}
+#Renaming rhe access point ID field to AID to avoid confusion
+access_points <- access_points%>%
+  rename(aid = id) 
+
+#Subset access points for each greenspace ha subsets
+ap_for_0.4 <- gs_less_0.4%>%
+  dplyr::select(1)%>%
+  st_drop_geometry()
+
+ap_for_0.4 <- merge(access_points, ap_for_0.4, 
+                    by.x=3,
+                    by.y=1)
+
+ap_for_2 <- gs_less_2%>%
+  dplyr::select(1)%>%
+  st_drop_geometry()
+
+ap_for_2 <- merge(access_points, ap_for_2, 
+                    by.x=3,
+                    by.y=1)
+
+ap_for_20 <- gs_less_20%>%
+  dplyr::select(1)%>%
+  st_drop_geometry()
+
+ap_for_20 <- merge(access_points, ap_for_20, 
+                  by.x=3,
+                  by.y=1)
+
+ap_for_60 <- gs_less_60%>%
+  dplyr::select(1)%>%
+  st_drop_geometry()
+
+ap_for_60 <- merge(access_points, ap_for_60, 
+                   by.x=3,
+                   by.y=1)
+
+ap_for_400 <- gs_less_400%>%
+  dplyr::select(1)%>%
+  st_drop_geometry()
+
+ap_for_400 <- merge(access_points, ap_for_400, 
+                   by.x=3,
+                   by.y=1)
+
+ap_for_more_400 <- gs_more_400%>%
+  dplyr::select(1)%>%
+  st_drop_geometry()
+
+ap_for_more_400 <- merge(access_points, ap_for_more_400, 
+                    by.x=3,
+                    by.y=1)
+
+#This is for all access points associated with greenspaces >2ha
+ap_more_2_all <- gs_more_2%>%
+  dplyr::select(1)%>%
+  st_drop_geometry()
+
+ap_more_2_all <- merge(access_points, ap_more_2_all,
+                           by.x=3,
+                           by.y=1)
+```
+
+Lets plot the access points for green spaces > 2 hectares
+
+```{r}
+tm_shape(msoa_boundaries) +
+  tm_polygons(col = "white", alpha = 0.2) +
+  tm_shape(ap_more_2_all)+
+  tm_dots(col= "green", size = 0.02)
+```
+
+Now the access points have been sub-set and matched to the sub-set of greenspaces defined by The London Plan's green space size and proximity recommendations. 
+
+### Creating Isochrones for each access point associated with a green space > 2 hectares.
+
+These access points will now be used for the isochrone creations using the [Mapbox Isochrone API](https://docs.mapbox.com/api/navigation/isochrone/). Since we will be using so many points this is very computationally intensive (the API processes 300 requests per minute). For reproducibility, the code I used is here however I would advise **not** to run it as it will take over an hour!
+
+The Mapbox API provides 100,000 free requests. A personal token will be needed to create the following isochrones so [sign-up](https://www.mapbox.com/) to Mapbox for free to get your personal token!
+
+Isochrone is defined as "equal time". The Mapbox isochrone API creates a buffer around a point that is defined by time and mode of transport i.e. walking or cycling. The isochrones made for this analysis use the following parameters:
+- time = 5 minutes (approximate time it takes to walk 400m and recommended distance in time by Natural England for proximity to atleast 2 hectares of green space).
+- mode = walking
+
+Thw following steps are to create the isochrones using access points for green spaces > 2 hectares in size. I created isochrones for the different access point sub-sets. This was to reduce the computational intensity of the isochrone creation. The following lines of code can be used for each sub-set, the example is creating isochrones with access points for green spaces that were more than 400 hectares. This will run quickly since there are only 19 access points for this sub-set!
+
+Stage 1 - Prepare data
+
+```{r}
+#Making new ID column titled apid
+ap_for_more_400 <- ap_for_4more_00 %>%
+  rowid_to_column(., "apid")
+
+#Pasting mapbox access token
+token <- "YOUR TOKEN"
+
+#Drop z dimension from features
+ap_for_more_400 <- ap_for_more_400%>%
+  st_zm(x)
+```
+
+Stage 2 - Create isochrones using Mapbox API
+
+```{r}
+library("mapboxapi")
+
+ap_for_more_400_iso <- mb_isochrone(ap_for_more_400, "walking", time = 5, id_column = "apid", access_token = token)
+```
+
+Stage 3 - Join isochrone to associated access point
+
+```{r}
+#Subset access point, drop geometry
+#Now a dataframe
+ap_for_more_400 <- ap_for_more_400%>%
+  dplyr::select(., "apid", "accessType", "aid")%>%
+  st_drop_geometry()
+
+#Joining the walking isochrones with the ap_for_400
+ap_for_more_400_iso <- ap_for_more_400_iso%>%
+  merge(., ap_for_more_400, by.x="id", by.y="apid")
+```
+
+Stage 4 - Plot isochrones to see if it worked
+
+```{r}
+tm_shape(ap_for_more_400_iso) +
+  tm_polygons(col = "tomato",
+              border.lwd = 0.3,
+              alpha = 0.7) +
+  tm_shape(green_spaces_less_400) +
+  tm_polygons(col="green", alpha=0.5)
+```
+
+I have created isochrones for each sub-set of access points. The data can be downloaded from the GitHub repository and used rather than running the previous code. 
+
+```{r}
+ap_for_2_iso <-st_read("data/isochrones/for_04_to_2ha_iso_5min.shp")%>%
+  st_transform(.,27700)
+
+ap_for_20_iso <-st_read("data/isochrones/for_2_to_20ha_iso_5min.shp")%>%
+  st_transform(.,27700)
+
+ap_for_60_iso <- st_read("data/isochrones/for_20_to_60ha_iso_5min.shp")%>%
+  st_transform(.,27700)
+
+ap_for_400_iso <- st_read("data/isochrones/for_60_to_400ha_iso_5min.shp")%>%
+  st_transform(.,27700)
+
+ap_for_more_400_iso <- st_read("data/isochrones/more_400ha_iso_5min.shp")%>%
+  st_transform(.,27700)
+```
+
+### Further data processing using access point isochrones
+
+This next section will be the final stage to the data processing.
+
+First we need to create a field that contains the area for all the isochrones:
+
+```{r}
+#Creating area field
+ap_for_400_iso$iso_area <- st_area(ap_for_400_iso)
+ap_for_2_iso$iso_area <- st_area(ap_for_2_iso)
+ap_for_20_iso$iso_area <- st_area(ap_for_20_iso)
+ap_for_60_iso$iso_area <- st_area(ap_for_60_iso)
+ap_for_more_400_iso$iso_area <- st_area(ap_for_more_400_iso)
+```
+
+Next we need to dissolve the isochrone polygons so they become **one** object for each sub-set. The method to do this is creidted to Phil Mike Jones and can be found [here](https://philmikejones.me/tutorials/2015-09-03-dissolve-polygons-in-r/)
+
+```{r}
+#Dissolving the polygons so we get one object
+iso_400ha_d <- ap_for_400_iso%>%
+  st_union(.,)
+
+iso_2ha_d <- ap_for_2_iso%>%
+  st_union(.,)
+
+iso_20ha_d <- ap_for_20_iso%>%
+  st_union(.,)
+
+iso_60ha_d <- ap_for_60_iso%>%
+  st_union(.,)
+
+iso_m400ha_d <- ap_for_more_400_iso%>%
+  st_union(.,)
+```
+
+To keep track we can check what object type these newly dissolved isochrones are. It tells us that they are "sfc_MULTIPOLYGON" "sfc" (as lists). 
+
+```{r}
+class(iso_20ha_d)
+```
+
+The next step will be to carry out another union with each of the dissolved isochrones to create **one list of all isochrones** for access points that are associated with green spaces > 2 hectares.
+
+```{r}
+#Union to create one MULTIPOLYGON list
+all_m2ha_iso <- iso_20ha_d%>%
+  st_union(., iso_60ha_d)
+all_m2ha_iso <- all_m2ha_iso%>%
+  st_union(., iso_400ha_d)
+all_m2ha_iso <- all_m2ha_iso%>%
+  st_union(., iso_m400ha_d)
+```
+
+Again we can check the object type to make sure we are on track:
+
+```{r}
+class(all_m2ha_iso)
+```
+
+The final greenspace variable we want in the analysis is the proportion of greenspace > 2 hectares within a 5min walk. This will be calculated by its proportion to the total land area for each msoa, however when plotting the unionised isochrones for greenspaces > 2 hectares some of the isochrones do not cover all the greenspace. For example you can observe this with Hyde Park. If we ignored this then the proportion calculations would not be accurate and representative of the amount of area that does not fall in the defined proximity buffer created by the isochrones. It would assume that areas which *are* green space but are not included in the isochrone buffers to be areas that are not green spaces in the MSOAs. This would skew and mis-represent the proprtion variable. To prevent this mis-representation a final union needs to be run with the all_m2ha_iso and the respective greenspaces > 2 hectares. This will make sure all the greenspaces are accounted for in the area of proximate green space.
+
+To do this we will use the *gs_more_2* sf object we made earlier and the *all_m2ha_iso*:
+
+```{r}
+#Dissolve gs_more_2 first
+#This was the only way I could get the union to work
+gs_more_2_d <- gs_more_2%>%
+  st_union(.,)
+
+#Union using all_m2ha_iso and newly dissolved greenspaces > 2ha
+final_gs_area <- all_m2ha_iso%>%
+  st_union(., gs_more_2_d)
+
+#Check object type
+class(final_gs_area) #"sfc_MULTIPOLYGON" "sfc"
+```
+
+Since the final_gs_area is a MULTIPOLYGON sfc object we need to convert it into a simple feature object and create an area field containing the m2 area values for the proximate green space area:
+
+```{r}
+final_gs_area <- final_gs_area%>%
+  st_cast(., "POLYGON")%>%
+  enframe(.)%>%
+  st_as_sf(.)%>%
+  mutate(area_m2 = st_area(.))
+```
+
+Finally we can intersect the final_gs_area simple feature with the MSOA boundary data. This will allow us to get the proportion of proximate green space variable for each MSOA. 
+
+```{r}
+library(lwgeom)
+#Use lwgeom when geometry isn't valid
+
+msoa_gs <- st_intersection(st_make_valid(msoas), final_gs_area) #Intersection
+msoa_gs <- msoa_gs%>%
+  mutate(gs_area_m2 = st_area(.)) #create greenspace area field in m2
+```
+
+Following the intersection we will need to aggregate the area for each MSOA. Currently we have 1600+objs in the msoa_gs tibble when weneed 983 objs (number of London MSOAs) with the area of greenspace summed and aggregated. What the previous lines of code has done is drop the msoa boundary geometries and replaced it with the geometries of the greenspace intersections. For example, there are multiple versions of some MSOAs with the different geometries and areas of the intersected green spaces. 
+
+The following code chunk sorts this:
+- It groups the MSOAs by their code
+- Then it summarises the green space areas
+- Then the geometry is dropped
+- This leaves us with a tibble
+
+```{r}
+msoa_gs <- msoa_gs%>%
+  group_by(MSOA11CD)%>%
+  summarise(gs_area_m2 = sum(gs_area_m2))%>%
+  st_drop_geometry(.)
+```
+
+Now we can join the greenspace areas for the MSOAS to the original MSOAS sf object we made earlier:
+
+```{r}
+msoas <- merge(msoas, msoa_gs, by="MSOA11CD", all.x=T)
+```
+
+Ta-da! Now have an sf object with all London MSOAS and their areas of proximate green space defined by green spaces > 2 hectares within a 5 minute walk. The final code chunks do the final cleaning and then we can save the msoas as a shapefile that be read in for our analysis.
+
+```{r}
+#Creating a greenspace ha field
+#Converting the areas as numeric instead of units
+#Drop the land_ha field as it is a duplicate of the area_m2 field
+msoas <- msoas%>%
+  mutate(gs_area_ha = gs_area_m2 / 10000,
+         gs_area_m2 = as.numeric(gs_area_m2),
+         gs_area_ha = as.numeric(gs_area_ha),
+         area_m2 = as.numeric(area_m2),
+         area_ha = as.numeric(area_ha))%>%
+  dplyr::select(-28)
+
+#We have some NA values in the gs_area fields
+#Convert these to 0
+msoas <- msoas%>%
+  mutate(gs_area_ha = if_else(is.na(gs_area_ha), 0, gs_area_ha),
+         gs_area_m2 = if_else(is.na(gs_area_m2), 0, gs_area_m2))
+
+##Saving the msoas
+st_write(msoas, "data/msoas/msoas_final.shp")
+```
+
+
