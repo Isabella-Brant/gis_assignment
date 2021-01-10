@@ -11,7 +11,12 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## 01 Data Cleaning and Processing
 
-This is part 1 of the methodology. This section will provide a walk through of the data cleaning and processing that was required for the analysis.
+This is part 1 of the methodology. This section will provide a walk through of the data cleaning and processing that was required for the analysis. 
+
+All data used is available on GitHub [here](https://github.com/Isabella-Brant/gis_assignment/tree/main/tutorial). The csv files will be read in straight from GitHub however the shapefiles will need to be downloaded from the repository before undertaking this analysis. R isn't a fan of reading in shapefiles from GitHub so my advice is to:
+- Clone the respository in the terminal using this link: "https://github.com/Isabella-Brant/gis_assignment.git"
+- Pull all the contents of the repository onto your local drive
+= Read the shapefiles in this way
 
 Load the libraries:
 
@@ -27,7 +32,8 @@ library(tmaptools)
 ### COVID-19 case data for London MSOAs
 
 ```{r covid read, echo=FALSE}
-covid_msoa <- read_csv("data/raw/msoa_E12000007_2020-12-13.csv")
+library(readr) 
+covid_msoa <- read_csv("https://raw.githubusercontent.com/Isabella-Brant/gis_assignment/main/tutorial/data/raw/msoa_E12000007_2020-12-13.csv")
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
@@ -89,7 +95,7 @@ covid_msoa_totals%>%
 Now we will load in additional MSOA level data that we will use as confounding variables in later analysis. The majority of this data derives from the 2011 census and provides information on various area-specific characteristics such as age structure, house size, average household income etc.
 
 ```{r additional data}
-additional <- read_csv("data/raw/msoa-data.csv")
+additional <- read_csv("https://raw.githubusercontent.com/Isabella-Brant/gis_assignment/main/tutorial/data/raw/msoa-data.csv")
 ```
 
 This dataset has 984 objects when there are 983 MSOAs in London. This following line of code removes the row:
@@ -472,7 +478,7 @@ Stage 1 - Prepare data
 
 ```{r}
 #Making new ID column titled apid
-ap_for_more_400 <- ap_for_4more_00 %>%
+ap_for_more_400 <- ap_for_more_400 %>%
   rowid_to_column(., "apid")
 
 #Pasting mapbox access token
@@ -675,7 +681,7 @@ msoas <- msoas%>%
          gs_area_m2 = if_else(is.na(gs_area_m2), 0, gs_area_m2))
 
 ##Saving the msoas
-st_write(msoas, "data/msoas/msoas_final.shp")
+st_write(msoas, "tutorial/data/msoas/msoas_final_2.shp")
 ```
 
 
