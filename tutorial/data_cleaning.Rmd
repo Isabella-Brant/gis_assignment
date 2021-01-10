@@ -1,5 +1,5 @@
 ---
-title: "data_cleaning"
+title: "Methodology"
 author: "Isabella Brant"
 date: "09/01/2021"
 output: html_document
@@ -11,12 +11,17 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## 01 Data Cleaning and Processing
 
-This is part 1 of the methodology. This section will provide a walk through of the data cleaning and processing that was required for the analysis. 
+This is part 1 of the methodology. This section will provide a walk through of the data cleaning and processing that iss required for the analysis. 
 
 All data used is available on GitHub [here](https://github.com/Isabella-Brant/gis_assignment/tree/main/tutorial). The csv files will be read in straight from GitHub however the shapefiles will need to be downloaded from the repository before undertaking this analysis. R isn't a fan of reading in shapefiles from GitHub so my advice is to:
 - Clone the respository in the terminal using this link: "https://github.com/Isabella-Brant/gis_assignment.git"
 - Pull all the contents of the repository onto your local drive
-= Read the shapefiles in this way
+- Read the shapefiles in this way
+
+Alternatively, the following links will guide you to the webpage where I downloaded the shapefile data. To re-create the isochrones that I made (and saved as shapefiles on Github) you will need to run the line of code that I have blocked out from running on here. It will take about an hour as it is computationally intensive.
+- Middle Super Output Area Boundary Shapefiles can be found [here](https://data.london.gov.uk/download/statistical-gis-boundary-files-london/9ba8c833-6370-4b11-abdc-314aa020d5e0/statistical-gis-boundaries-london.zip) - we will be using the 'MSOA_2011_London_gen_MHW.shp'
+- Ordnance Survey Open Greenspace and Access Points can be found [here](https://api.os.uk/downloads/v1/products/OpenGreenspace/downloads?area=TQ&format=ESRI%C2%AE+Shapefile&redirect) - select custom tile 'TQ' and download as a shapefile
+
 
 Load the libraries:
 
@@ -46,7 +51,7 @@ covid_msoa <- covid_msoa %>%
   dplyr::select(c(areaCode, areaName, date, newCasesBySpecimenDateRollingSum)) #Fields we want\
 ```
 
-Now convert the date field to data specification:
+Now convert the date field to date specification:
 
 ```{r convert to date}
 covid_msoa$date <- as.Date(covid_msoa$date,"%d/%m/%y")
@@ -482,7 +487,8 @@ ap_for_more_400 <- ap_for_more_400 %>%
   rowid_to_column(., "apid")
 
 #Pasting mapbox access token
-token <- "YOUR TOKEN"
+#Please use your token here
+token <- "pk.eyJ1IjoiaXNhYmVsbGEtYnJhbnQiLCJhIjoiY2tocWF1Njk1MDdrdTJzdDBwamNvdGZkYyJ9.KVTPMDU_ou-O0yylao4pqw"
 
 #Drop z dimension from features
 ap_for_more_400 <- ap_for_more_400%>%
@@ -518,7 +524,7 @@ tm_shape(ap_for_more_400_iso) +
   tm_polygons(col = "tomato",
               border.lwd = 0.3,
               alpha = 0.7) +
-  tm_shape(green_spaces_less_400) +
+  tm_shape(gs_less_400) +
   tm_polygons(col="green", alpha=0.5)
 ```
 
@@ -662,26 +668,29 @@ msoas <- merge(msoas, msoa_gs, by="MSOA11CD", all.x=T)
 
 Ta-da! Now have an sf object with all London MSOAS and their areas of proximate green space defined by green spaces > 2 hectares within a 5 minute walk. The final code chunks do the final cleaning and then we can save the msoas as a shapefile that be read in for our analysis.
 
+Creating green space area fields:
+
 ```{r}
 #Creating a greenspace ha field
-#Converting the areas as numeric instead of units
-#Drop the land_ha field as it is a duplicate of the area_m2 field
-msoas <- msoas%>%
+#Convert to numeric
+#remove duplicate land area field
+msoas_final <- msoas%>%
   mutate(gs_area_ha = gs_area_m2 / 10000,
          gs_area_m2 = as.numeric(gs_area_m2),
          gs_area_ha = as.numeric(gs_area_ha),
          area_m2 = as.numeric(area_m2),
          area_ha = as.numeric(area_ha))%>%
   dplyr::select(-28)
+```
 
+Convert NA values to 0:
+
+```{r}
 #We have some NA values in the gs_area fields
 #Convert these to 0
-msoas <- msoas%>%
+msoas_final <- msoas_final%>%
   mutate(gs_area_ha = if_else(is.na(gs_area_ha), 0, gs_area_ha),
          gs_area_m2 = if_else(is.na(gs_area_m2), 0, gs_area_m2))
-
-##Saving the msoas
-st_write(msoas, "tutorial/data/msoas/msoas_final_2.shp")
 ```
 
 
