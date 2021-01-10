@@ -1,0 +1,655 @@
+---
+title: "Methodology"
+author: "Isabella Brant"
+date: "10/01/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 02 Spatial Analysis
+
+This next section will provide a step-by-step walk through of the methodology conducted for this analysis. The methods used are:
+- Bi-variate OLS model
+- Multi-variate OLS model
+- Spatial Auto-correlation using local Moran's I
+- Spatial Lag Model and Spatial Errors Model
+- Geographically Weighted Regression
+
+Lets load our libraries:
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(janitor)
+library(sf)
+library(tmap)
+library(tmaptools)
+library(ggplot2)
+library(ggthemes)
+library(broom)
+library(corrr)
+```
+
+And then read in our data:
+
+```{r}
+data <- st_read("data/msoas/msoas_final.shp")
+```
+
+Some of the field names in the MSOA shapefile were abbreviated and haven't been given the most intuitive of names so we need to rename them:
+
+```{r}
+data <- data%>%
+  rename(code = MSOA11C,
+         totcases = ttl_css,
+         p_0_15 = pc_0_15,
+         hh_tot = hhlds_t,
+         p_hhwdc = pct_hh_,
+         p_lphh = pct_lp_,
+         p_1phh = pct_1p_,
+         pct_oth = pct_thr,
+         pct_oo = pct_wnt,
+         pct_det = pct_dtc,
+         pct_ql4 = pct_q4_,
+         mn_hh_i = mn_hh_n,
+         pct_obe = pct_16_,
+         le_f = le_feml,
+         le_m = le_male,
+         gs_m2 = gs_r_m2,
+         gs_ha = gs_ar_h)
+```
+
+We need to transform the total cases and greenspace area fields to the following:
+
+- pr_cases = proportion of covid-19 cases out of the msoa population (this represents the prevalence)
+
+- pr_gsm2/ha = proportion of proximate public green space area (> 2 hectares with 5 min proximity) to the total land area of each msoa.
+
+```{r}
+data <- data%>%
+  mutate(pr_cases = totcases / pop * 100,
+         pr_gsm2 = gs_m2 / area_m2 * 100,
+         pr_gsha = gs_ha / area_ha * 100)
+```
+
+### Exploratory Spatial Data Analysis
+
+Lets do some EDA and see what the distributions are for the proportions of proximate public green space in the London MSOAS and the proportion of total COVID-19 cases to the population of each MSOA. 
+
+Looking at the distribution for the proportion of proximate public green space in each MSOA, it can be concluded that it is of a normal distribution.
+
+```{r}
+data%>%
+  ggplot(aes(x=pr_gsha)) +
+  geom_histogram(position="identity", 
+                 alpha=0.5, 
+                 bins=15, 
+                 fill="lightblue2", col="lightblue3")+
+  geom_vline(aes(xintercept=mean(pr_gsha)),
+             color="blue",
+             linetype="dashed")+
+  labs(title="Distribution of the proportion of proximate public green spaces that are 2 hectares or more,
+       within a 5 minute walking distance to the total land area of each MSOA.",
+       x="Proportion of defined greenspace",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+However, the distribution of the proportion of total COVID-19 cases to the population of each MSOA (between 22/09/2020 to 08/12/2020) appears to be positively skewed.
+
+```{r}
+data%>%
+  ggplot(aes(x=pr_cases)) +
+  geom_histogram(position="identity", 
+                 alpha=0.5, 
+                 bins=15, 
+                 fill="lightblue2", col="lightblue3")+
+  geom_vline(aes(xintercept=mean(pr_cases)),
+             color="blue",
+             linetype="dashed")+
+  labs(title="Distribution of the proportion of total COVID-19 cases to the population
+       of each MSOA.",
+       x="Proportion of COVID-19 cases (%)",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Spatial Autocorrelation 
+
+For exploratory purposes we will explore whether spatial autocorrelation is present in the proportion of proximate green space variable. Given the literature that exists, we can be confident that we will find significant results both at global and local levels using Moran's I, Geary's C and Getis-Ords statistics.
+
+To begin, we will plot a simple interactive map to visualise the spatial variations in the proportion of proximate public green space for each MSOA. We can see that some clustering exists with both high proportions of proximate public green space and low proportions.
+
+```{r}
+tmap_mode("view")
+
+tm_shape(data) +
+  tm_polygons("pr_gsha",
+              style="jenks",
+              palette="BuGn",
+              n=4,
+              midpoint=NA,
+              popup.vars=c("name", "pr_gsha"),
+              title="Proportion of proximate public green space to total land area (%)")
+```
+
+**We will run:**
+
+- Moran's I
+
+- Geary's C
+
+- Getis-Ord
+
+global spatial statistics to quantify our initial observations:
+
+```{r}
+library(sp)
+library(spData)
+library(spdep)
+
+coordsMSOA <- data%>%
+  st_centroid()%>%
+  st_geometry()
+
+plot(coordsMSOA,axes=TRUE)
+```
+
+We will then create a neighbours list using Queens Contiguity Neighbours. A snap value argument of 0.0001 was recommended by [this article](https://gis.stackexchange.com/questions/355300/poly2nb-spdep-not-identifying-neighbours-correctly) to accurately identify the required neighbours. 
+
+```{r}
+msoa_nb <- data%>%
+  poly2nb(., queen=T, snap = 0.0001) #snap value needed
+```
+
+Now we can plot the MSOA centroids and Queens contiguity neighbours.
+
+```{r}
+plot(msoa_nb, st_geometry(coordsMSOA), col="red")
+plot(data$geometry, add=T)
+```
+
+Now we need to create a spatial weights matrix from the MSOA neighbours list:
+
+```{r}
+msoa.lw <- msoa_nb %>%
+  nb2listw(., style="C")
+```
+
+We now have the parameters needed to run the Moran's I, Geary's C and Getis-Ords  **global** spatial statistics.
+
+*Moran's I*
+- The Moran's I score shows moderate spatial autocorrelation exists (0.212011)
+
+```{r}
+I_MSOA_Global_prgs <- data%>%
+  pull(pr_gsha) %>%
+  as.vector()%>%
+  moran.test(., msoa.lw)
+
+I_MSOA_Global_prgs
+```
+
+*Geary's C*
+- The Geary's C spatial statistic shows us that positive spatial autocorrelation or similar values are clustering because the statistic is less than 1.0 at 0.78959 
+
+```{r}
+C_MSOA_Global_prgs <- 
+  data %>%
+  pull(pr_gsha) %>%
+  as.vector()%>%
+  geary.test(., msoa.lw)
+
+C_MSOA_Global_prgs
+```
+
+*Getis-Ord*
+- The Getis-Ord statistic is more than the expected value
+- This means that high values are clustered spatially
+
+```{r}
+G_MSOA_Global_prgs <- 
+  data %>%
+  pull(pr_gsha) %>%
+  as.vector()%>%
+  globalG.test(., msoa.lw)
+
+G_MSOA_Global_prgs
+```
+
+The spatial statistics that were ran above show us that on a global scale there is spatial clustering/ spatial autocorrelation within the proportion of proximate public green space variable. This was hypothesised when observing the interactive plot of the variable. 
+
+Now **local** spatial statistics will be run to quanitfy the local spatial autocorrelation.
+
+*Local Moran's I*
+
+```{r}
+I_MSOA_Local_prgs <- data %>%
+  pull(pr_gsha) %>%
+  as.vector()%>%
+  localmoran(., msoa.lw)%>%
+  as_tibble()
+
+slice_head(I_MSOA_Local_prgs, n=5)
+
+#Add local values to new dataframe
+data2 <- data%>%
+  mutate(prgs_I =as.numeric(I_MSOA_Local_prgs$Ii))%>%
+  mutate(prgs_Iz =as.numeric(I_MSOA_Local_prgs$Z.Ii))
+```
+
+*Local Getis-Ord*
+
+```{r}
+#Local Getis Ord for Hot and Cold spots
+Gi_MSOA_Local_prgs <- data%>%
+  pull(pr_gsha) %>%
+  as.vector()%>%
+  localG(., msoa.lw)
+
+head(Gi_MSOA_Local_prgs)
+
+#Joining
+data2 <- data2 %>%
+  mutate(prgs_G = as.numeric(Gi_MSOA_Local_prgs))
+```
+
+To understand the results, let's map them and see what appears significant.
+
+Plot of Local Moran's I results:
+
+```{r}
+library(RColorBrewer)
+
+breaks1<-c(-1000,-2.58,-1.96,-1.65,1.65,1.96,2.58,1000)
+MoranColours<- brewer.pal(8, "PiYG")
+
+tmap_mode("view")
+
+tm_shape(data2) +
+  tm_polygons("prgs_Iz",
+              style="fixed",
+              breaks=breaks1,
+              palette=MoranColours,
+              midpoint=NA,
+              title="Local Moran's I: Results for the Proportion of proximate public green spaces
+              across London.")
+```
+
+Plot the Local Getis-Ords statistics to visualise the hot and cold spots:
+
+```{r}
+GIColours<- rev(brewer.pal(8, "RdBu"))
+
+tmap_mode("view")
+
+tm_shape(data2) +
+  tm_polygons("prgs_G",
+              style="fixed",
+              breaks=breaks1,
+              palette=GIColours,
+              midpoint=NA,
+              title="Local Getis-Ord: Proportion of proximate public green spaces across London.")
+```
+
+
+The two plots show similar spatial clustering however the local Getis Ord's results illustrate a more distinguishable difference between hot and cold spots of spatial clustering. This distinction can be observed when looking at the areas around Richmond Park and the City of London. Local Getis Ord's results demonstrate a clearer idea of where high and low values are clustering.
+
+
+### Analysing COVID-19 Prevalence in London MSOAS
+
+This next part of the analysis will be investigating COVID-19 prevalence in London MSOAs. Both global and local models with *and* without the greenspace variable will be included to observe its role in explaining COVID-19 prevalence. 
+
+We will begin by running basic, global Ordinary Least Square (OLS) Models to examine the relationships between COVID-19 and the proportion of proximate public green space and other explanatory variables. 
+
+Since the proportion of COVID-19 variable is positively skewed, it will be logged for the following models. This is a quick plot of its distribution after it has had a log-normal transformation.
+
+```{r include=FALSE}
+ggplot(data, aes(x=log(pr_cases))) + 
+  geom_histogram()
+```
+
+The first OLS model will be a bi-variate model using the proportion of COVID-19 variable as the dependent variable and proportion of proximate public green space as the independent variable. The initial plot shows a very minimal negative linear relationship between the dependent and independent variable.
+
+```{r}
+#OLS Plot 1 - log(pr_cases) ~ pr_gsha
+q1 <- qplot(x = pr_gsha, 
+            y = log(pr_cases), 
+            data=data)
+
+q1 + stat_smooth(method="lm", se=FALSE, size=1) + 
+  geom_jitter()
+```
+
+And the OLS model results do not show anything significant at the 95% confidence level:
+
+```{r}
+Regression_data1 <- data%>%
+  dplyr::select(c(pr_cases, pr_gsha))
+
+model1 <- Regression_data1%>%
+  lm(log(pr_cases) ~
+       pr_gsha,
+     data=.)
+
+summary(model1)
+```
+
+
+Although the bi-variate OLS model does not show a significant relationship between the prevalence of COVID-19 and proportion of proximate public green space for the MSOAs, this doesn't nullify the contribution of the green space variable in a multi-variate OLS model. In fact when a multi-variate model is run and includes the green space variable, the variable is highlighted as significant. We will explore this here as well as creating a multi-variate model **without** the green space variable so we can observe its contribution to the model. 
+
+
+*Stage 1 - Run first model with selected explanatory variables*
+
+```{r}
+#Variables selected for multi-variate OLS model 1
+mlr_data <- data%>%
+  dplyr::select(pop_den, av_hhsz, pct_65, p_hhwdc, p_1phh, pct_bam,
+                pct_oo, pct_srn, pct_det, pct_flt, pct_sem, pct_trr,
+                pct_ql4, pct_eco_i, pct_limlt, pct_lmltt,pct_ntl,
+                pct_h_vb, pct_h_b, pct_h_f, pct_obe, le_m, pr_gsha, pr_cases)
+
+#Multi-variate regression WITH pr_gsha
+mlr_1 <- lm(log(pr_cases) ~
+              pop_den + av_hhsz + pct_65 + p_hhwdc + p_1phh + pct_bam +
+              pct_oo + pct_srn + pct_det + pct_flt + pct_sem + pct_trr +
+              pct_ql4 + pct_eco_i + pct_limlt + pct_lmltt + pct_ntl +
+              pct_h_vb + pct_h_b + pct_h_f + pct_obe + le_m + pr_gsha,
+            data=mlr_data)
+
+summary(mlr_1)
+```
+
+The results in this model show that in a multi-variate model the pr_gsha variable is significant with a p-value of 0.016312. Several variables have been flagged as significant in the model so model 2 will drop any insignificant variables.
+
+
+*Stage 2 - Run second multi-variate OLS model*
+
+```{r}
+#Only selected the significant variables from model_1
+mlr_data_2 <- data%>%
+  dplyr::select(pop_den, av_hhsz, pct_65, p_hhwdc, pct_bam,
+                pct_srn, pct_ql4, pct_eco_i, pct_h_b,le_m, pr_gsha, pr_cases)
+
+#model 2 - with pr_gsha variable
+mlr_2 <- lm(log(pr_cases) ~ pop_den + av_hhsz + pct_65 + p_hhwdc + pct_bam +
+              pct_srn + pct_ql4 + pct_eco_i + pct_h_b + le_m + pr_gsha, 
+            data=mlr_data_2)
+            
+summary(mlr_2)
+```
+
+The new model shows that all the variables except the pop_den variable are significant in the model. The model shows that pr_gsha is a negative coefficient, meaning that at a global scale when the proportion of greenspace increases, a decrease in the prevalence of COVID-19 is experienced. The R^2 is still on the low end at 0.29 and 0.28 (for adj r-sq) but we can conclude that the variables in the model do explain some of the variation in the proportion of COVID-19 variable. 
+
+To meet the conditions of a global regression model, the model needed to be checked for multicollinearity between the variables. 
+
+```{r include=FALSE}
+library(regclass)
+VIF(mlr_2)
+```
+
+The av_hhsz had the highest VIF at 6.5 however since it is under the threshold of 10 we will keep it in the model.
+
+*Stage 3 - Finalising the multi-variate OLS model*
+
+```{r}
+#Finalise model and drop pop_den variable
+
+final_data <- data%>%
+  dplyr::select(code, av_hhsz, pct_65, p_hhwdc, pct_bam,
+                pct_srn, pct_ql4, pct_eco_i, pct_h_b,le_m, pr_gsha, pr_cases)
+
+mlr_final <- lm(log(pr_cases) ~ av_hhsz + pct_65 + p_hhwdc + pct_bam +
+                  pct_srn + pct_ql4 + pct_eco_i + pct_h_b + le_m + pr_gsha, 
+                data=final_data)
+
+summary(mlr_final)
+```
+
+Running VIF again to check for multicollinearity:
+
+```{r}
+VIF(mlr_final)
+```
+
+The VIF results are acceptable and the 10 explanatory variables all remain significant in the model.
+
+*Stage 4 - Creating the final model* ***without*** *the proportion of proximate green space variable*
+
+```{r}
+#Final model WITHOUT the pr_gsha variable
+mlr_final2 <- lm(log(pr_cases) ~ av_hhsz + pct_65 + p_hhwdc + pct_bam +
+                   pct_srn + pct_ql4 + pct_eco_i + pct_h_b + le_m, 
+                 data=final_data)
+
+summary(mlr_final2)
+```
+
+When comparing the results we can see that the pr_gsha has a tiny coefficient however it does add to the r-squared value. Then again, the r-squared value will always increase when adding a new variable to the model. When we compare the adjusted R^2 we can see that it has ever so slightly improved the model by including the pr_gsha variable. We can say that the proportion of proximate public green space *does* add to the model and we should explore the model further using spatial statistical analyses. 
+
+Let's save the residual results from the global mlr_final model and write them out
+
+```{r}
+mlr_final_data <- mlr_final %>%
+  broom::augment(., final_data)
+
+# add the residuals backs to the data sf 
+data <- data %>%
+  mutate(final_model_resids = residuals(mlr_final))
+```
+
+### Exploring the spatial autocorrelation of the multi-variate residuals
+
+From the Moran's I, Geary's C and Getis-Ords statistics we observed earlier, we quantified the spatial autocorrelation that exists in the the pr_gsha variable. This spatial autocorrelation biases the model and will need to be dealt with. 
+
+We'll plot the residuals of the model to see what the obvious patterns are:
+
+```{r}
+tmap_mode("view")
+
+final_resids_pal <- rev(brewer.pal(5, "RdYlBu"))
+
+tm_shape(data) +
+  tm_polygons("final_model_resids",
+              palette = final_resids_pal)
+```
+
+This plot visually confirms spatial autocorrelation of the final_mlr residuals but we can run Moran's I to quantify that spatial autocorrelation exists between the residuals.
+
+We can use the same centroids, neighbours and spatial weights matrix parameters we made earlier for this:
+
+- coordsMSOA
+
+- msoa.lw
+
+- msoa_nb
+
+```{r}
+#Creating
+Queen_MI <- data %>%
+  st_drop_geometry()%>%
+  dplyr::select(final_model_resids)%>%
+  pull()%>%
+  moran.test(., msoa.lw)%>%
+  tidy()
+Queen_MI
+```
+
+The results show that Queen_MI is about 0.460 this shows that there's moderate spatial autocorrelation between our residuals and therefore it is likely to be biasing our final multi-variate model.
+
+This suggests that the multi-variate model is inappropriate for accurately exploring our spatial data and the associations which exist between COVID-19 prevalence and the various explanatory variables (including the proportion of proximate public green space)
+
+This finding means we can move onto creating a Spatial Lag Model (SLM) and 
+Spatial Error Model (SEM) to explore the impact of spatial autocorrelation in the multi-variate model.
+
+*Spatial Lag Model*
+
+The Lag Model test results are significant wiht a p-value of < 0.05. This means we can reject the null hypothesis that there is no spatial autocorrelation between our final model residuals 
+
+#what do the outputs show?
+#The RHO
+#The LR
+```{r include=FALSE}
+library(spatialreg)
+
+slm_final_model_queen <- lagsarlm(log(pr_cases) ~ av_hhsz + pct_65 + p_hhwdc + pct_bam +
+                                    pct_srn + pct_ql4 + pct_eco_i + pct_h_b + le_m + pr_gsha,
+                                  data = final_data,
+                                  nb2listw(msoa_nb, style="C"),
+                                  method = "eigen")
+
+#Write out the SLM residuals
+data <- data %>%
+  mutate(slm_q_resids = residuals(slm_final_model_queen))
+
+summary(slm_final_model_queen)
+tidy(slm_final_model_queen)
+```
+
+We can run Moran's I on the SLM residuals to observe the removal of spatial autocorrelation:
+
+```{r}
+#Running the Moran's I on the SLM residuals
+QMoran <- data %>%
+  st_drop_geometry()%>%
+  dplyr::select(slm_q_resids)%>%
+  pull()%>%
+  moran.test(., msoa.lw)%>%
+  tidy()
+
+QMoran
+```
+
+Using the Queens spatial weights matrix and running Moran's I we can see the removal of spatial autocorrelation since the Moran's I statistic is 0.0577. 
+
+
+*Spatial Error Model*
+EXPLAIN RESULTS
+
+```{r}
+#Use queen contiguity neighbours too
+sem_final_model_q <- errorsarlm(log(pr_cases) ~ av_hhsz + pct_65 + p_hhwdc + pct_bam +
+                                  pct_srn + pct_ql4 + pct_eco_i + pct_h_b + le_m + pr_gsha,
+                                data = final_data,
+                                nb2listw(msoa_nb, style="C"), 
+                                method = "eigen")
+
+tidy(sem_final_model_q)
+sem_final_model_q
+```
+
+From looking at the SLM and SEM results it could be that the spatial autocorrelation is biasing the final multi-variate OLS model but it also could be that the global regression models are ultimately unsuitable for the data we are exploring. 
+
+A **Geographically Weighted Regression** may be more suitable to investigate the local story, for example in some areas the slope coefficients between the dependent and independent variables may differ.  Global models fail to detect this spatial variation. We can explore this by carrying out a GWR. 
+
+Let's print the results of the final multi-variate OLS model and quickly plot them:
+
+```{r}
+summary(mlr_final)
+
+tm_shape(data) +
+  tm_polygons("final_model_resids",
+              palette = final_resids_pal)
+```
+
+For the spgwr package I will be using, we will need to transform our final_data for the regression and the MSOA centroids into sp objects from sf:
+
+```{r include=FALSE}
+library(spgwr)
+
+#Final variables for regression model
+st_crs(final_data) = 27700
+final_data_SP <- final_data%>%
+  as(., "Spatial")
+
+#Centroids of MSOAs
+st_crs(coordsMSOA) = 27700
+coordsMSOA_SP <- coordsMSOA%>%
+  as(., "Spatial")
+```
+
+Next we need to calculate the kernel bandwidth for the GWR. This may take several moments to configure - ... EXPLAIN
+
+```{r}
+GWRbandwidth <- gwr.sel(log(pr_cases) ~ av_hhsz + pct_65 + p_hhwdc + pct_bam +
+                          pct_srn + pct_ql4 + pct_eco_i + pct_h_b + le_m + pr_gsha, 
+                        data=final_data_SP, 
+                        coords=coordsMSOA_SP,
+                        adapt=T)
+```
+
+The GWR can now be run:
+
+```{r}
+gwr.model = gwr(log(pr_cases) ~ av_hhsz + pct_65 + p_hhwdc + pct_bam +
+                  pct_srn + pct_ql4 + pct_eco_i + pct_h_b + le_m + pr_gsha, 
+                data=final_data_SP, 
+                coords=coordsMSOA_SP, 
+                adapt=GWRbandwidth, 
+                hatmatrix=TRUE, 
+                se.fit=TRUE)
+gwr.model
+```
+
+Lets write the regression coefficients back to the final_data object. We can plot these coefficients shortly:
+
+```{r}
+results <- as.data.frame(gwr.model$SDF)
+
+final_data <- final_data%>%
+  mutate(coef_av_hhsz = results$av_hhsz,
+         coef_pct_65 = results$pct_65,
+         coef_p_hhwdc = results$p_hhwdc,
+         coef_pct_bam = results$pct_bam,
+         coef_pct_srn = results$pct_srn,
+         coef_pct_ql4 = results$pct_ql4,
+         coef_pct_eco_i = results$pct_eco_i,
+         coef_pct_h_b = results$pct_h_b,
+         coef_le_m = results$le_m,
+         coef_pr_gsha = results$pr_gsha)
+```
+
+We can then merge the GWR coefficient results with the original sf dataframe:
+
+```{r}
+##Add the GWR coefficients back to the original data sf object
+#Drop geometry from final_data first
+final_data <- final_data%>%
+  st_drop_geometry()%>%
+  dplyr::select(c(code,
+                  coef_av_hhsz,
+                  coef_pct_65,
+                  coef_p_hhwdc,
+                  coef_pct_bam,
+                  coef_pct_srn,
+                  coef_pct_ql4,
+                  coef_pct_eco_i,
+                  coef_pct_h_b,
+                  coef_le_m,
+                  coef_pr_gsha))
+
+data <- data%>%
+  merge(., final_data,
+        by.x=1,
+        by.y=1)
+```
+
+First plot of the GWR coefficients for proportion of proximate green space variable
+
+```{r}
+#Plotting the pr_gsha GWR residuals
+tmap_mode("plot")
+
+tm_shape(data) +
+  tm_polygons(col = "coef_pr_gsha", 
+              palette = "RdBu", 
+              alpha = 0.5)
+```
+
+
