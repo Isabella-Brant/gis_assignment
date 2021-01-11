@@ -1,15 +1,11 @@
 ---
-title: "Methodology"
-author: "Isabella Brant"
-date: "09/01/2021"
+title: "Data cleaning and processing"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-## 01 Data Cleaning and Processing
 
 This is part 1 of the methodology. This section will provide a walk through of the data cleaning and processing that iss required for the analysis. 
 
@@ -25,7 +21,7 @@ Alternatively, the following links will guide you to the webpage where I downloa
 
 Load the libraries:
 
-```{r library}
+```{r library, include=FALSE}
 library(dplyr)
 library(tidyverse)
 library(janitor)
@@ -36,12 +32,10 @@ library(tmaptools)
 
 ### COVID-19 case data for London MSOAs
 
-```{r covid read, echo=FALSE}
+```{r covid read,}
 library(readr) 
 covid_msoa <- read_csv("https://raw.githubusercontent.com/Isabella-Brant/gis_assignment/main/tutorial/data/raw/msoa_E12000007_2020-12-13.csv")
 ```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
 
 Now filter the data to make sure all area codes are E02:
 
@@ -53,13 +47,13 @@ covid_msoa <- covid_msoa %>%
 
 Now convert the date field to date specification:
 
-```{r convert to date}
+```{r convert to date, include=FALSE}
 covid_msoa$date <- as.Date(covid_msoa$date,"%d/%m/%y")
 ```
 
 Now we need to remove the data from the weeks in the first wave. This dataset begins in March 2020 when testing first began in the UK however mass testing for the general public was only made available from May. It was decided for this study to only use case data from the call of the 'second wave' in the UK since the case data is a more accurate representation of COVID-19 prevalence in London. The beginning of the second wave of COVID-19 in the UK is defined from the week commencing 22 September 2020 where new restrictions were put in place and following Johnson's announcement of a seconf wave on 18 September 2020.
 
-```{r covid further clean}
+```{r covid further clean, include=FALSE}
 covid_msoa <- covid_msoa%>%
   subset(., date >= "2020-09-22")
 
@@ -77,7 +71,7 @@ covid_msoa_totals <- covid_msoa%>%
 
 Lets have a look at the distribution of COVID-19 case totals in each MSOA:
 
-```{r}
+```{r, include=FALSE}
 #Distribution plot of covid cases for each msoa
 covid_msoa_totals%>%
   ggplot(aes(x=total_cases)) +
@@ -99,7 +93,7 @@ covid_msoa_totals%>%
 
 Now we will load in additional MSOA level data that we will use as confounding variables in later analysis. The majority of this data derives from the 2011 census and provides information on various area-specific characteristics such as age structure, house size, average household income etc.
 
-```{r additional data}
+```{r additional data,}
 additional <- read_csv("https://raw.githubusercontent.com/Isabella-Brant/gis_assignment/main/tutorial/data/raw/msoa-data.csv")
 ```
 
@@ -118,7 +112,7 @@ additional <- clean_names(additional)
 ```
 
 Next we will filter the dataset and select our fields of interest. These fields include Ethnic group, household composition %, age structure, tenure, dwelling type, land area, med house price, qualification, economic activity, household income, income deprivation, health, obesity %, life expectancy We will do this by specifying the index number of the columns:
-```{r}
+```{r, }
 
 additional <- additional%>%
   dplyr::select(c(1:9, 43, 49:53, 60:65, 96:99, 106:111, 112, 120, 132:139, 143:145, 148:151, 159:161, 167:171, 176, 182:183))
@@ -126,7 +120,7 @@ additional <- additional%>%
 
 Next we will convert the age structure and level 4 or above qualifications field values into ratios. This data type is more comparable and insightful for analysis than raw numbers:
 
-```{r}
+```{r, }
 #Converting age structure into ratios
 additional <- replace(additional, 4, additional$age_structure_2011_census_0_15 / additional$age_structure_2011_census_all_ages * 100)
 additional <- replace(additional, 5, additional$age_structure_2011_census_16_29 / additional$age_structure_2011_census_all_ages * 100)
@@ -140,7 +134,7 @@ additional <- replace(additional, 39, additional$qualifications_2011_census_high
 
 Here we will filter out several more fields in the dataset:
 
-```{r}
+```{r, }
 additional <- additional%>%
   dplyr::select(-c(9, 12, 15, 23, 25, 26, 27, 33, 34:38, 40:41, 43, 46:48))
 ```
@@ -149,21 +143,34 @@ Since we will be joining this data to a shapefile later we will need to shorten 
 
 *These are the less intuitive field name conversions:*
 - pct_hh_wc = percentge of couple households with dependent child
+
 - pct_lp_hh = percentage of lone parent household
+
 - pct_1p_hold = percentage of 1 person household
+
 - pct_mm = percentaged of mixed multiple ethnic groups
+
 - pct_ownout = percentage of owned outright tenure
+
 - pct_srent = percentage of social rented tenure
+
 - pct_ql4_ab = percentage of level 4 qualifications and above
+
 - pct_eco_a = percentage of economically active
+
 - pct_eco_ia =percentage of economically inactive
+
 - mn_ahh_in = mean annual household income (£)
+
 - pct_limlot = percentage of day to day activities limited a lot
+
 - pct_limltt = percentage of day to day activities limited a little
+
 - pct_limnot = percentage of day to day activities not limited
+
 - pct_16p_ob = percentage of 16 plus population obese (determined by bmi above 30)
 
-```{r}
+```{r, include=FALSE}
 additional <- additional%>%
   rename(pop = age_structure_2011_census_all_ages,
          pct_0_15 = age_structure_2011_census_0_15,
@@ -209,7 +216,7 @@ additional <- additional%>%
 
 Now we will read in the London MSOA boundary shapefiles. Here we will select a couple of fields of interest and then join the COVID-19 data and additional data to it. 
 
-```{r}
+```{r, }
 #Read in MSOA boundaries
 msoa_boundaries <- st_read("data/raw/statistical-gis-boundaries-london/ESRI/MSOA_2011_London_gen_MHW.shp")%>%
   st_transform(., 27700)
@@ -222,7 +229,7 @@ msoa_boundaries <- msoa_boundaries%>%
 
 Now it is ready for us to join the COVID-19 and additional data to it:
 
-```{r}
+```{r, }
 #Join COVID cases to msoa_boundaries
 msoa_boundaries <- merge(msoa_boundaries, covid_msoa_totals, 
                          by.x=1,
@@ -247,19 +254,27 @@ This next section will be dedicated to cleaning and processing the green space a
 
 *These are the following steps for the workflow:*
 -	Clip green spaces and access points to London boundary
+
 -	Sub-set the green space and access points into different simple feature objects using The London Plan’s defined public green space sizes (see literature review for green space size and proximity breakdown)
+
 -	Use the Mapbox Isochrone API to create 5 minute walk isochrone polygons for all access points that are referenced to green spaces of at least 2 hectares or more
+
 -	Dissolve the isochrones to create one sf object
+
 -	Intersect the dissolved isochrone sf object with the greenspaces to ensure all green spaces are included in the proximity object
+
 -	Intersect the final sf object to the London MSOA boundaries
+
 -	Calculate the area (in m2 and hectares) of proximate green space that intersects with each MSOA
+
 -	Calculate the percentage of each MSOA’s total land area that is covered by proximate green space
+
 -	Proportion of proximate green space variable has been created
 
 
 Lets read in the green space polygons and access points:
 
-```{r}
+```{r,}
 green_spaces <- st_read("data/raw/OS Open Greenspace (ESRI Shape File) TQ/data/TQ_GreenspaceSite.shp")%>%
   st_transform(., 27700)
 
@@ -269,7 +284,7 @@ access_points <- st_read("data/raw/OS Open Greenspace (ESRI Shape File) TQ/data/
 
 We need to clip the green space and access points to the London MSOA boundaries since this dataset includes green space and access points for London and South East England.
 
-```{r}
+```{r, }
 green_spaces <- green_spaces[msoa_boundaries,]
 access_points <- access_points[msoa_boundaries,]
 ```
@@ -278,7 +293,7 @@ We can plot the green space and access points to see how we are getting on.
 
 Plot of green spaces:
 
-```{r}
+```{r, }
 #Plot of greenspaces on MSOA layer
 tmap_mode("view")
 
@@ -290,7 +305,7 @@ tm_shape(msoa_boundaries) +
 
 Plot of access points:
 
-```{r}
+```{r, }
 #Quick plot of access points on msoa boundaries
 tmap_mode("view")
 
@@ -302,7 +317,7 @@ tm_shape(msoa_boundaries) +
 
 Now we can do some data cleaning that includes removing several unhelpful fields and tidying up the field names:
 
-```{r}
+```{r, }
 #Removing several fields from green_spaces
 #Then cleaning field names
 green_spaces <- green_spaces%>%
@@ -314,14 +329,14 @@ green_spaces <-clean_names(green_spaces)
 
 Now that we have cleaned the data we can begin exploring the green space and access points. First we should create new fields that contain the area of each greenspace in m2 and hectares. This will allow us to subset them by The London Plan's green space size and proximity recommendations [found here](https://www.london.gov.uk/sites/default/files/the_london_plan_2016_jan_2017_fix.pdf). 
 
-```{r}
+```{r, }
 #creating new fields for area of green spaces in m2 and ha
 green_spaces <- green_spaces%>%
   mutate(area_m2 = st_area(.),
          area_ha = area_m2/10000)
 ```
 
-Now we can have a quick look at the distribution of green space sizes in London. We can see that there is a large variance on green space sizes. 
+Now we can have a quick look at the distribution of green space sizes in London. We can see that there is a large variance of green space sizes. 
 
 ```{r}
 #Looking at the distribution of green space sizes in ha
@@ -342,14 +357,14 @@ sizes of green spaces (in ha) and proximity:
 
 For this analysis we are going to explore green spaces of 2 hectares or more in size. First we need to convert the area columns from 'units' to numeric. This will allow us to subset the green spaces by area size:
 
-```{r}
+```{r, }
 green_spaces$area_m2 <- as.numeric(green_spaces$area_m2)
 green_spaces$area_ha <- as.numeric(green_spaces$area_ha)
 ```
 
 Here we can sub-set the green spaces by their area size defined by The London Plan:
 
-```{r}
+```{r, }
 #less 0.4ha
 gs_less_0.4 <- green_spaces%>% #has 400m proximity policy
   filter(area_ha<=0.4)
@@ -381,7 +396,7 @@ gs_more_2 <- green_spaces%>% #min 400m proximity policy
 
 Now we can see how the subset looks by plotting all green spaces of 2 hectares or more:
 
-```{r}
+```{r, }
 tm_shape(msoa_boundaries) +
   tm_polygons(col = "white", alpha = 0.2) +
   tm_shape(gs_more_2)+
@@ -392,7 +407,7 @@ Now that we have sub-set the green spaces we need to subset the access points to
 
 The reason we are doing this is because we will be using the access points to create the proximity isochrones. We will only be focusing on green spaces of 2 hectares or more so need their respective access points:
 
-```{r}
+```{r, }
 #Renaming rhe access point ID field to AID to avoid confusion
 access_points <- access_points%>%
   rename(aid = id) 
@@ -458,7 +473,7 @@ ap_more_2_all <- merge(access_points, ap_more_2_all,
 
 Lets plot the access points for green spaces > 2 hectares
 
-```{r}
+```{r, }
 tm_shape(msoa_boundaries) +
   tm_polygons(col = "white", alpha = 0.2) +
   tm_shape(ap_more_2_all)+
@@ -477,11 +492,11 @@ Isochrone is defined as "equal time". The Mapbox isochrone API creates a buffer 
 - time = 5 minutes (approximate time it takes to walk 400m and recommended distance in time by Natural England for proximity to atleast 2 hectares of green space).
 - mode = walking
 
-Thw following steps are to create the isochrones using access points for green spaces > 2 hectares in size. I created isochrones for the different access point sub-sets. This was to reduce the computational intensity of the isochrone creation. The following lines of code can be used for each sub-set, the example is creating isochrones with access points for green spaces that were more than 400 hectares. This will run quickly since there are only 19 access points for this sub-set!
+Thw following steps are to create the isochrones using access points for green spaces > 2 hectares in size. I created isochrones for the different access point sub-sets. This was to reduce the computational intensity of the isochrone creation. The following lines of code can be used for each sub-set, the example is creating isochrones with access points for green spaces that were more than 400 hectares. This will run quickly since there are only 19 access points for this sub-set! If you cannot read in the shapefiles then please proceed with these steps for all the access point sub-sets!
 
 Stage 1 - Prepare data
 
-```{r}
+```{r, }
 #Making new ID column titled apid
 ap_for_more_400 <- ap_for_more_400 %>%
   rowid_to_column(., "apid")
@@ -497,7 +512,7 @@ ap_for_more_400 <- ap_for_more_400%>%
 
 Stage 2 - Create isochrones using Mapbox API
 
-```{r}
+```{r, }
 library("mapboxapi")
 
 ap_for_more_400_iso <- mb_isochrone(ap_for_more_400, "walking", time = 5, id_column = "apid", access_token = token)
@@ -505,7 +520,7 @@ ap_for_more_400_iso <- mb_isochrone(ap_for_more_400, "walking", time = 5, id_col
 
 Stage 3 - Join isochrone to associated access point
 
-```{r}
+```{r, }
 #Subset access point, drop geometry
 #Now a dataframe
 ap_for_more_400 <- ap_for_more_400%>%
@@ -519,7 +534,7 @@ ap_for_more_400_iso <- ap_for_more_400_iso%>%
 
 Stage 4 - Plot isochrones to see if it worked
 
-```{r}
+```{r, }
 tm_shape(ap_for_more_400_iso) +
   tm_polygons(col = "tomato",
               border.lwd = 0.3,
@@ -553,7 +568,7 @@ This next section will be the final stage to the data processing.
 
 First we need to create a field that contains the area for all the isochrones:
 
-```{r}
+```{r, }
 #Creating area field
 ap_for_400_iso$iso_area <- st_area(ap_for_400_iso)
 ap_for_2_iso$iso_area <- st_area(ap_for_2_iso)
@@ -564,7 +579,7 @@ ap_for_more_400_iso$iso_area <- st_area(ap_for_more_400_iso)
 
 Next we need to dissolve the isochrone polygons so they become **one** object for each sub-set. The method to do this is creidted to Phil Mike Jones and can be found [here](https://philmikejones.me/tutorials/2015-09-03-dissolve-polygons-in-r/)
 
-```{r}
+```{r, }
 #Dissolving the polygons so we get one object
 iso_400ha_d <- ap_for_400_iso%>%
   st_union(.,)
@@ -584,13 +599,13 @@ iso_m400ha_d <- ap_for_more_400_iso%>%
 
 To keep track we can check what object type these newly dissolved isochrones are. It tells us that they are "sfc_MULTIPOLYGON" "sfc" (as lists). 
 
-```{r}
+```{r,}
 class(iso_20ha_d)
 ```
 
 The next step will be to carry out another union with each of the dissolved isochrones to create **one list of all isochrones** for access points that are associated with green spaces > 2 hectares.
 
-```{r}
+```{r, }
 #Union to create one MULTIPOLYGON list
 all_m2ha_iso <- iso_20ha_d%>%
   st_union(., iso_60ha_d)
@@ -602,7 +617,7 @@ all_m2ha_iso <- all_m2ha_iso%>%
 
 Again we can check the object type to make sure we are on track:
 
-```{r}
+```{r,}
 class(all_m2ha_iso)
 ```
 
@@ -610,7 +625,7 @@ The final greenspace variable we want in the analysis is the proportion of green
 
 To do this we will use the *gs_more_2* sf object we made earlier and the *all_m2ha_iso*:
 
-```{r}
+```{r, }
 #Dissolve gs_more_2 first
 #This was the only way I could get the union to work
 gs_more_2_d <- gs_more_2%>%
@@ -626,7 +641,7 @@ class(final_gs_area) #"sfc_MULTIPOLYGON" "sfc"
 
 Since the final_gs_area is a MULTIPOLYGON sfc object we need to convert it into a simple feature object and create an area field containing the m2 area values for the proximate green space area:
 
-```{r}
+```{r, }
 final_gs_area <- final_gs_area%>%
   st_cast(., "POLYGON")%>%
   enframe(.)%>%
@@ -636,7 +651,7 @@ final_gs_area <- final_gs_area%>%
 
 Finally we can intersect the final_gs_area simple feature with the MSOA boundary data. This will allow us to get the proportion of proximate green space variable for each MSOA. 
 
-```{r}
+```{r, }
 library(lwgeom)
 #Use lwgeom when geometry isn't valid
 
@@ -653,7 +668,7 @@ The following code chunk sorts this:
 - Then the geometry is dropped
 - This leaves us with a tibble
 
-```{r}
+```{r, }
 msoa_gs <- msoa_gs%>%
   group_by(MSOA11CD)%>%
   summarise(gs_area_m2 = sum(gs_area_m2))%>%
@@ -662,7 +677,7 @@ msoa_gs <- msoa_gs%>%
 
 Now we can join the greenspace areas for the MSOAS to the original MSOAS sf object we made earlier:
 
-```{r}
+```{r, }
 msoas <- merge(msoas, msoa_gs, by="MSOA11CD", all.x=T)
 ```
 
@@ -670,7 +685,7 @@ Ta-da! Now have an sf object with all London MSOAS and their areas of proximate 
 
 Creating green space area fields:
 
-```{r}
+```{r, }
 #Creating a greenspace ha field
 #Convert to numeric
 #remove duplicate land area field
@@ -685,7 +700,7 @@ msoas_final <- msoas%>%
 
 Convert NA values to 0:
 
-```{r}
+```{r, }
 #We have some NA values in the gs_area fields
 #Convert these to 0
 msoas_final <- msoas_final%>%

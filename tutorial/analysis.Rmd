@@ -1,15 +1,11 @@
 ---
-title: "Methodology"
-author: "Isabella Brant"
-date: "10/01/2021"
+title: "Analysis"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
-## 02 Spatial Analysis
 
 This next section will provide a step-by-step walk through of the methodology conducted for this analysis. The methods used are:
 - Bi-variate OLS model
@@ -20,7 +16,7 @@ This next section will provide a step-by-step walk through of the methodology co
 
 Lets load our libraries:
 
-```{r}
+```{r, include=FALSE}
 library(dplyr)
 library(tidyverse)
 library(janitor)
@@ -35,13 +31,13 @@ library(corrr)
 
 And then read in our data:
 
-```{r}
+```{r, include=FALSE}
 data <- st_read("data/msoas/msoas_final.shp")
 ```
 
 Some of the field names in the MSOA shapefile were abbreviated and haven't been given the most intuitive of names so we need to rename them:
 
-```{r}
+```{r, }
 data <- data%>%
   rename(code = MSOA11C,
          totcases = ttl_css,
@@ -149,7 +145,7 @@ tm_shape(data) +
 
 global spatial statistics to quantify our initial observations:
 
-```{r}
+```{r, include=FALSE}
 library(sp)
 library(spData)
 library(spdep)
@@ -651,5 +647,175 @@ tm_shape(data) +
               palette = "RdBu", 
               alpha = 0.5)
 ```
+
+
+## Visualisation and Cartography
+
+This final part of the methodology will be dedicated to making the data visualisations and maps that are included in the write-up. 
+
+The following visualisations will be made:
+
+- Basic map of the London MSOA boundaries
+
+- Histogram of the proportion of COVID-19 in London MSOAs
+
+- Histogram of the proportion of proximate green space in London MSOAs
+
+- Map of the proportion of proximate green space in London MSOAs
+
+- Map of the GWR coefficients for the proportion of proximate green space across London
+
+ggsave() should work for saving any ggplot but for me it didn't work so I have been using a function found [here](https://stackoverflow.com/questions/22742737/save-ggplot-with-a-function). All credit to enricoferrero on stackoverflow!
+
+Load libraries we need:
+```{r libraries, include=FALSE}
+library(tmap)
+library(tmaptools)
+library(ggplot2)
+library(ggthemes)
+```
+
+Basic map of London MSOA boundaries:
+
+```{r}
+
+tmap_mode("plot")
+
+boundaries <- tm_shape(data) +
+  tm_polygons(col ="blue",
+              alpha = 0.1,
+              border.lwd = 0.3)+
+  tm_layout(inner.margins = c(0.09, 0.10, 0.10, 0.10))+
+  tm_compass(text.size = 0.5,
+             position = c("right", "top"))+
+  tm_scale_bar(text.size = 0.4,
+               color.dark = "gray60",
+                   position = c("left", "BOTTOM")) +
+  tm_layout(title = "London's 983 Middle Super Output Areas (MSOA)", title.size = 0.8) +
+  tm_credits(size = 3, text = "Contains National Statistics data © Crown copyright and database right [2015] and Contains Ordnance Survey data © Crown copyright and database right [2015]\nMap created by Isabella Brant", position = c("left", "BOTTOM"))
+
+boundaries 
+
+#tmap_save(boundaries, filename="msoa_map.png")
+
+```
+
+Histogram of the proportion of proximate green space in London MSOAs:
+
+```{r, }
+greenspace_dist <- data%>%
+  ggplot(aes(x=pr_gsha)) +
+  geom_histogram(position="identity", 
+                 alpha=0.5, 
+                 bins=15, 
+                 fill="lightblue2", col="lightblue2")+
+  geom_vline(aes(xintercept=mean(pr_gsha)),
+             color="blue",
+             linetype="dashed")+
+  labs(title="Distribution of the proportion\nof proximate public green spaces to the total\n land area of London MSOAs.",
+       x="Proportion of proximate public green space",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+greenspace_dist
+
+#savePlot <- function(greenspace_dist) {
+        #pdf("greenspace_dist.pdf")
+        #print(greenspace_dist)
+        #dev.off()
+#}
+
+#savePlot(greenspace_dist)
+
+```
+
+Histogram of the proportion of COVID-19 in London MSOAs:
+
+```{r, }
+covid_dist <- data%>%
+  ggplot(aes(x=pr_cases)) +
+  geom_histogram(position="identity", 
+                 alpha=0.5, 
+                 bins=15, 
+                 fill="lightblue2", col="lightblue3")+
+  geom_vline(aes(xintercept=mean(pr_cases)),
+             color="blue",
+             linetype="dashed")+
+  labs(title="Distribution of the proportion of total COVID-19 cases to the population
+       of each MSOA.",
+       x="Proportion of COVID-19 cases (%)",
+       y="Frequency")+
+  theme_classic()+
+  theme(plot.title = element_text(hjust = 0.5))
+
+covid_dist
+
+#savePlot <- function(covid_dist) {
+        #pdf("covid_dist.pdf")
+        #print(covid_dist)
+        #dev.off()
+#}
+
+#savePlot(covid_dist)
+
+```
+
+
+
+Map of the proportion of proximate green space in London MSOAs:
+
+```{r, }
+gs_pal <- brewer.pal(5, "Greens")
+  
+prop_gs <- tm_shape(data) +
+  tm_polygons("pr_gsha",
+              text.size = 0.4,
+              palette = gs_pal,
+              title="Proportion of green space (%)",
+              title.size = 0.3,
+              alpha = 0.8)+
+  tm_layout(inner.margins = c(0.10, 0.18, 0.12, 0.20))+
+  tm_compass(text.size = 0.5,
+             position = c("right", "top"))+
+  tm_scale_bar(text.size = 0.4,
+               color.dark = "gray60",
+                   position = c("left", "BOTTOM")) +
+  tm_layout(title = "Proportion of proximate public green space to the total\nland area of each London MSOA.", title.size = 1) +
+  tm_credits(size = 3, text = "Contains National Statistics data © Crown copyright and database right [2015] and Contains Ordnance Survey data © Crown copyright and database right [2015]\nMap created by Isabella Brant", position = c("left", "BOTTOM"))
+
+prop_gs
+
+#tmap_save(prop_gs, filename="prop_gs.png")
+
+```
+
+Map of the GWR coefficients for the proportion of proximate green space across London:
+
+```{r, }
+tmap_mode("plot")
+
+GWR_map <- tm_shape(data) +
+  tm_polygons("coef_pr_gsha",
+              text.size = 0.4,
+              palette = "RdBu",
+              title="Coefficient value",
+              title.size = 0.3,
+              alpha = 0.6)+
+  tm_layout(inner.margins = c(0.10, 0.18, 0.12, 0.20))+
+  tm_compass(text.size = 0.5,
+             position = c("right", "top"))+
+  tm_scale_bar(text.size = 0.4,
+               color.dark = "gray60",
+                   position = c("left", "BOTTOM")) +
+  tm_layout(title = "GWR coefficients for the proportion of proximate\ngreen space variable", 
+            title.size = 1,
+            title.color = "black") +
+  tm_credits(size = 3, text = "Contains National Statistics data © Crown copyright and database right [2015] and Contains Ordnance Survey data © Crown copyright and database right [2015]\nMap created by Isabella Brant", position = c("left", "BOTTOM"))
+
+GWR_map
+
+#tmap_save(GWR_map, filename="gwr_map.png")
+
 
 
