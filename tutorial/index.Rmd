@@ -1,0 +1,11 @@
+---
+title: "GIS Final Assignment"
+author: "Isabella Brant"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Hello, welcome to the reproducible analysis for the final assignment for CASA0005 Geographic Information Systems and Science module!

@@ -1,0 +1,19 @@
+name: "Reproducible-Methodology"
+navbar:
+  title: "Reproducible Methodology"
+  left:
+    - text: "Welcome"
+      href: index.html
+    - text: "Introduction"
+      href: introduction.html
+    - text: "Data Cleaning"
+      href: data_cleaning.html
+    - text: "Analysis"
+      href: analysis.html
+      output:
+  html_document:
+    theme: cosmo
+    highlight: textmate
+    include:
+      after_body: footer.html
+    css: styles.css

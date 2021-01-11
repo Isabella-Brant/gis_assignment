@@ -1,0 +1,14 @@
+---
+title: "Introduction"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is a step-by-step walkthrough of the methodology used for CASA0005 Geographic Information Systems and Science module at the Centre for Advanced Spatial Analysis, UCL. 
+
+The research is focusing on the following:"A spatial exploration of the role of proximate public green space and prevalence of COVID-19 in London, UK."
+
+It aims to explore whether an association exists between the role of proximate public green space and prevalence of COVID-19 in London. It was hypothesised that a negative association exists between the two variables where areas with higher proportions of proximate public green space experience a lower proportion of total COVID-19 cases (prevalence of the virus). Global regression and local geographically weighted regression are the key methods of analyses used. 
